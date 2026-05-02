@@ -1,6 +1,6 @@
 # Character Sprite Maker
 
-A generalized Agent Skill derived from the uploaded `hatch-pet` workflow. It creates configurable 2D game character spritesheets with arbitrary animation rows, custom frame counts, custom cell sizes, references, chroma-key cleanup, frame extraction, atlas validation, contact sheets, GIF previews, and generic `character.json` packaging.
+It creates configurable 2D game character spritesheets with arbitrary animation rows, custom frame counts, custom cell sizes, references, chroma-key cleanup, frame extraction, atlas validation, contact sheets, GIF previews, and generic `character.json` packaging.
 
 ## Minimal example
 
