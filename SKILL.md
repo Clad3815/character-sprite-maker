@@ -181,7 +181,8 @@ This writes `decoded/base.png` and `references/canonical-base.png`. Every animat
 Run job status again. For each ready animation job:
 
 - read the row prompt;
-- attach all input images listed in the manifest;
+- **ALWAYS attach the canonical base image** (`references/canonical-base.png`, also available as `decoded/base.png`) as a grounding input — never generate an animation strip from the prompt alone. The prompt describes the action; the base image defines the character's identity, proportions, face, costume, palette, props, outline, silhouette, and camera angle. Without the base attached, the character will drift between rows.
+- attach all other input images listed in the manifest (additional references, prior animation strips when listed, etc.);
 - include the matching `references/layout-guides/<animation>.png` as a layout-only input;
 - treat the guide as invisible construction information; reject outputs that copy guide boxes, labels, marks, or the guide background;
 - reject outputs whose background is not one exact flat chroma key color across the full canvas;
@@ -195,7 +196,7 @@ Guidelines when delegating to subagents:
 
 - Only parallelize after the `base` job is fully validated and recorded. Never parallelize the base itself.
 - Launch one subagent per ready animation job (or small batches), all in a single dispatch where the host supports concurrent subagent calls.
-- Give each subagent a self-contained brief: the run directory, the exact `job-id`, the prompt file path, the full list of input images (with role labels, including the canonical base and the matching layout guide), the chroma-key requirements, and the instruction to call `$imagegen` and then `record_imagegen_result.py --strict-chroma-background` for that single job.
+- Give each subagent a self-contained brief: the run directory, the exact `job-id`, the prompt file path, the full list of input images (with role labels, **always including the canonical base `references/canonical-base.png` as a mandatory grounding image**, plus the matching layout guide), the chroma-key requirements, and the instruction to call `$imagegen` and then `record_imagegen_result.py --strict-chroma-background` for that single job. Subagents must never generate an animation strip from the prompt alone — the canonical base image is required on every animation call.
 - Each subagent must record its result independently via `record_imagegen_result.py`; do not let subagents edit `imagegen-jobs.json` directly or touch jobs other than their own.
 - Mirror-derived rows (e.g. `walk-left` from `walk-right`) must wait for their source row to be recorded; either keep them in the main agent or schedule them in a second wave after the source completes.
 - If the host environment does not expose subagents, or the user declines parallel delegation, fall back to sequential generation in the main agent using the same per-job rules.
@@ -275,6 +276,7 @@ Then regenerate only the reopened rows with `$imagegen`, record them, and finali
 
 - Use `$imagegen` for base and animation-strip visual generation.
 - Only the base job may be prompt-only. Every animation-strip job must attach the listed grounding images.
+- **ALWAYS attach the canonical base image (`references/canonical-base.png` / `decoded/base.png`) when generating any animation strip.** Generating an animation row from the prompt alone is forbidden — the base image is what locks identity, proportions, face, costume, palette, props, outline, silhouette, and camera angle across all rows. This rule applies equally to the main agent and to any subagents dispatched in parallel.
 - Do not synthesize missing art locally with code.
 - Do not edit `imagegen-jobs.json` to fake completion; use `record_imagegen_result.py` or `derive_mirror_animation.py`.
 - Keep the same identity across all animations: proportions, face, costume, palette, prop design, outline, silhouette, and camera angle.
