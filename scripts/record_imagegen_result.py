@@ -83,21 +83,35 @@ def audit_chroma_background(path: Path, chroma_key: tuple[int, int, int]) -> dic
     with Image.open(path) as opened:
         image = opened.convert("RGBA")
     border = max(4, min(16, min(image.width, image.height) // 32))
+    total_edge_count = 0
+    transparent_edge_count = 0
     distances: list[float] = []
     for y in range(image.height):
         for x in range(image.width):
             if x >= border and x < image.width - border and y >= border and y < image.height - border:
                 continue
+            total_edge_count += 1
             red, green, blue, alpha = image.getpixel((x, y))
             if alpha <= 16:
+                transparent_edge_count += 1
                 continue
             distances.append(color_distance((red, green, blue), chroma_key))
 
+    transparent_edge_ratio = transparent_edge_count / total_edge_count if total_edge_count else 0.0
     if not distances:
+        warnings = []
+        if transparent_edge_ratio < CHROMA_MIN_NEAR_EDGE_RATIO:
+            warnings.append(
+                "could not audit chroma background because the image border has no opaque pixels, "
+                f"but only {transparent_edge_ratio:.1%} of edge pixels were transparent"
+            )
         return {
-            "ok": False,
+            "ok": not warnings,
+            "total_edge_pixel_count": total_edge_count,
             "edge_pixel_count": 0,
-            "warnings": ["could not audit chroma background because the image border has no opaque pixels"],
+            "transparent_edge_count": transparent_edge_count,
+            "transparent_edge_ratio": round(transparent_edge_ratio, 4),
+            "warnings": warnings,
         }
 
     exact_count = sum(1 for distance in distances if distance == 0)
@@ -119,7 +133,10 @@ def audit_chroma_background(path: Path, chroma_key: tuple[int, int, int]) -> dic
 
     return {
         "ok": not warnings,
+        "total_edge_pixel_count": total_edge_count,
         "edge_pixel_count": len(distances),
+        "transparent_edge_count": transparent_edge_count,
+        "transparent_edge_ratio": round(transparent_edge_ratio, 4),
         "border_width": border,
         "chroma_rgb": list(chroma_key),
         "exact_edge_ratio": round(exact_edge_ratio, 4),
@@ -158,8 +175,10 @@ def validate_source_path(source: Path, run_dir: Path, allow_run_source: bool) ->
     if is_relative_to(source, run_dir) and not allow_run_source:
         raise SystemExit(
             "source image is inside the run directory; record the original $imagegen output instead, "
-            "or pass --allow-run-source only for controlled tests/manual imports"
+            "or pass --allow-run-source for controlled normalized/manual imports"
         )
+    if is_relative_to(source, run_dir):
+        return "normalized-run-source"
     return "built-in-imagegen-or-manual"
 
 
@@ -209,7 +228,7 @@ def main() -> None:
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--allow-run-source", action="store_true", help="Allow a source inside the run directory; useful for tests/manual imports only.")
+    parser.add_argument("--allow-run-source", action="store_true", help="Allow a source inside the run directory; useful for normalize_chroma_source.py outputs or controlled manual imports.")
     parser.add_argument("--strict-chroma-background", action="store_true", help="Reject the image if its edge background is not a flat chroma-key color.")
     parser.add_argument("--skip-chroma-background-audit", action="store_true", help="Skip the generated-image chroma background audit.")
     args = parser.parse_args()
@@ -253,7 +272,7 @@ def main() -> None:
                     "job_id": args.job_id,
                     "source": str(source),
                     "chroma_background_audit": chroma_audit,
-                    "hint": "Regenerate this image with an exact flat chroma-key background, or rerun without --strict-chroma-background only after visual approval.",
+                    "hint": "Regenerate this image with an exact flat chroma-key background, or normalize a visually clean removable chroma source with normalize_chroma_source.py and record that PNG.",
                 }, indent=2))
                 raise SystemExit(1)
 

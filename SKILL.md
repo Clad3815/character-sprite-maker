@@ -160,9 +160,10 @@ Invoke `$imagegen` with:
 Chroma-key discipline:
 
 - The generated background must be the exact flat chroma key stored in `character_request.json`, edge to edge.
-- Reject outputs with gradients, vignettes, shaded studio backgrounds, floor planes, shadows, glow, texture, or any background color drift.
+- Reject outputs with gradients, vignettes, shaded studio backgrounds, floor planes, shadows, glow, texture, or uneven/non-removable background color drift.
 - When recording normal `$imagegen` results, use `--strict-chroma-background` so bad chroma backgrounds fail immediately instead of surfacing later during extraction.
-- If strict recording fails, regenerate with a shorter prompt that emphasizes the exact RGB background before accepting a manual override.
+- If strict recording fails because the background has only small uniform imagegen RGB drift but is visually a clean removable chroma background, normalize the selected source to alpha with `normalize_chroma_source.py`, then record the normalized PNG with `--strict-chroma-background`. Do not composite the alpha result back onto the chroma key.
+- If strict recording still fails after one regeneration and one normalization attempt, reject the source and regenerate.
 
 After selecting the best output, record it:
 
@@ -172,6 +173,24 @@ python "$SKILL_DIR/scripts/record_imagegen_result.py" \
   --job-id base \
   --source /absolute/path/to/generated-output.png \
   --strict-chroma-background
+```
+
+If the selected output has a visually flat chroma background but strict recording fails due to RGB drift, normalize first:
+
+```bash
+python "$SKILL_DIR/scripts/normalize_chroma_source.py" \
+  --run-dir /absolute/path/to/run \
+  --source /absolute/path/to/generated-output.png \
+  --out /absolute/path/to/run/normalized/base.png \
+  --auto-key border \
+  --force
+
+python "$SKILL_DIR/scripts/record_imagegen_result.py" \
+  --run-dir /absolute/path/to/run \
+  --job-id base \
+  --source /absolute/path/to/run/normalized/base.png \
+  --strict-chroma-background \
+  --allow-run-source
 ```
 
 This writes `decoded/base.png` and `references/canonical-base.png`. Every animation strip must use the canonical base as a grounding image.
@@ -185,8 +204,8 @@ Run job status again. For each ready animation job:
 - attach all other input images listed in the manifest (additional references, prior animation strips when listed, etc.);
 - include the matching `references/layout-guides/<animation>.png` as a layout-only input;
 - treat the guide as invisible construction information; reject outputs that copy guide boxes, labels, marks, or the guide background;
-- reject outputs whose background is not one exact flat chroma key color across the full canvas;
-- record the selected `$imagegen` output with `record_imagegen_result.py`.
+- reject outputs whose background is not a single clean removable chroma field across the full canvas;
+- record the selected `$imagegen` output with `record_imagegen_result.py`; if strict recording fails only because of chroma RGB drift, normalize with `normalize_chroma_source.py` and record that alpha PNG.
 
 Parallelize animation generation with subagents (preferred):
 
@@ -196,7 +215,7 @@ Guidelines when delegating to subagents:
 
 - Only parallelize after the `base` job is fully validated and recorded. Never parallelize the base itself.
 - Launch one subagent per ready animation job (or small batches), all in a single dispatch where the host supports concurrent subagent calls.
-- Give each subagent a self-contained brief: the run directory, the exact `job-id`, the prompt file path, the full list of input images (with role labels, **always including the canonical base `references/canonical-base.png` as a mandatory grounding image**, plus the matching layout guide), the chroma-key requirements, and the instruction to call `$imagegen` and then `record_imagegen_result.py --strict-chroma-background` for that single job. Subagents must never generate an animation strip from the prompt alone — the canonical base image is required on every animation call.
+- Give each subagent a self-contained brief: the run directory, the exact `job-id`, the prompt file path, the full list of input images (with role labels, **always including the canonical base `references/canonical-base.png` as a mandatory grounding image**, plus the matching layout guide), the chroma-key requirements, and the instruction to call `$imagegen` and then `record_imagegen_result.py --strict-chroma-background` for that single job. If strict recording fails only because of chroma RGB drift, the subagent should run `normalize_chroma_source.py` and record the normalized alpha PNG with `--allow-run-source`. Subagents must never generate an animation strip from the prompt alone — the canonical base image is required on every animation call.
 - Each subagent must record its result independently via `record_imagegen_result.py`; do not let subagents edit `imagegen-jobs.json` directly or touch jobs other than their own.
 - Mirror-derived rows (e.g. `walk-left` from `walk-right`) must wait for their source row to be recorded; either keep them in the main agent or schedule them in a second wave after the source completes.
 - If the host environment does not expose subagents, or the user declines parallel delegation, fall back to sequential generation in the main agent using the same per-job rules.
@@ -278,11 +297,13 @@ Then regenerate only the reopened rows with `$imagegen`, record them, and finali
 - Only the base job may be prompt-only. Every animation-strip job must attach the listed grounding images.
 - **ALWAYS attach the canonical base image (`references/canonical-base.png` / `decoded/base.png`) when generating any animation strip.** Generating an animation row from the prompt alone is forbidden — the base image is what locks identity, proportions, face, costume, palette, props, outline, silhouette, and camera angle across all rows. This rule applies equally to the main agent and to any subagents dispatched in parallel.
 - Do not synthesize missing art locally with code.
-- Do not edit `imagegen-jobs.json` to fake completion; use `record_imagegen_result.py` or `derive_mirror_animation.py`.
+- Deterministic scripts may remove a generated chroma-key background, preserve alpha, mirror an approved row, extract frames, compose atlases, and validate outputs. They must not invent or redraw character art.
+- Do not edit `imagegen-jobs.json` to fake completion; use `record_imagegen_result.py`, `normalize_chroma_source.py` plus `record_imagegen_result.py`, or `derive_mirror_animation.py`.
 - Keep the same identity across all animations: proportions, face, costume, palette, prop design, outline, silhouette, and camera angle.
 - Enforce the exact requested frame count for each animation.
 - Use the chroma key stored in `character_request.json`; do not force a fixed green screen.
-- Do not accept generated source images with gradient, textured, vignetted, shaded, or drifting chroma backgrounds. The chroma background must be a single exact RGB key color across all non-character pixels.
+- Do not accept generated source images with gradient, textured, vignetted, shaded, or uneven/non-removable chroma backgrounds. The preferred background is a single exact RGB key color across all non-character pixels; if imagegen produces a clean but slightly RGB-drifted chroma field, normalize it to alpha with `normalize_chroma_source.py` before recording.
+- Do not accept a final atlas with visible chroma-key pixels or chroma-colored antialias fringes. `validate_atlas.py` checks this by default.
 - Reject visible layout guides, labels, frame numbers, grids, UI, scenery, watermarks, text, checkerboards, white/black backgrounds, shadows, glows, motion blur, dust, speed lines, and detached effects unless the user explicitly requested an effect and it remains compatible with transparent extraction.
 - Treat slot-sliced extraction as a warning unless the user or operator has visually approved it. Component extraction is preferred.
 - For side-facing mirrored rows, mirror only when side-specific details remain correct.
@@ -294,6 +315,7 @@ Then regenerate only the reopened rows with `$imagegen`, record them, and finali
 - Used cells are non-empty; unused cells are transparent.
 - `qa/review.json` has no errors.
 - `final/validation.json` has no errors.
+- `final/validation.json` reports zero visible chroma-key leaks.
 - `qa/contact-sheet.png` and GIF previews have been produced unless explicitly skipped.
 - Visual review confirms identity consistency and usable animation cycles.
 - `package/character.json` and the packaged WebP spritesheet are staged together unless packaging was skipped.

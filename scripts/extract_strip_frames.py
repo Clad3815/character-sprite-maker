@@ -25,6 +25,65 @@ def color_distance(red: int, green: int, blue: int, key: tuple[int, int, int]) -
     return math.sqrt((red - key[0]) ** 2 + (green - key[1]) ** 2 + (blue - key[2]) ** 2)
 
 
+def iter_rgba_pixels(image: Image.Image):
+    data = image.convert("RGBA").tobytes()
+    for index in range(0, len(data), 4):
+        yield data[index], data[index + 1], data[index + 2], data[index + 3]
+
+
+def scrub_hidden_rgb(image: Image.Image, alpha_threshold: int = 0) -> Image.Image:
+    rgba = image.convert("RGBA")
+    cleaned = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+    cleaned.putdata([
+        (0, 0, 0, 0) if alpha <= alpha_threshold else (red, green, blue, alpha)
+        for red, green, blue, alpha in iter_rgba_pixels(rgba)
+    ])
+    return cleaned
+
+
+def scrub_chroma_key_leaks(image: Image.Image, chroma_key: tuple[int, int, int], threshold: float) -> Image.Image:
+    rgba = image.convert("RGBA")
+    pixels = rgba.load()
+    for y in range(rgba.height):
+        for x in range(rgba.width):
+            red, green, blue, alpha = pixels[x, y]
+            if alpha > 0 and color_distance(red, green, blue, chroma_key) <= threshold:
+                pixels[x, y] = (0, 0, 0, 0)
+    return scrub_hidden_rgb(rgba)
+
+
+def resize_rgba_alpha_safe(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    rgba = scrub_hidden_rgb(image)
+    if rgba.size == size:
+        return rgba
+
+    premultiplied = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+    premultiplied.putdata([
+        (
+            round(red * alpha / 255),
+            round(green * alpha / 255),
+            round(blue * alpha / 255),
+            alpha,
+        )
+        for red, green, blue, alpha in iter_rgba_pixels(rgba)
+    ])
+    resized = premultiplied.resize(size, Image.Resampling.LANCZOS)
+    unpremultiplied = Image.new("RGBA", resized.size, (0, 0, 0, 0))
+    pixels = []
+    for red, green, blue, alpha in iter_rgba_pixels(resized):
+        if alpha <= 0:
+            pixels.append((0, 0, 0, 0))
+        else:
+            pixels.append((
+                min(255, round(red * 255 / alpha)),
+                min(255, round(green * 255 / alpha)),
+                min(255, round(blue * 255 / alpha)),
+                alpha,
+            ))
+    unpremultiplied.putdata(pixels)
+    return scrub_hidden_rgb(unpremultiplied)
+
+
 def request_path_from_decoded(decoded_dir: Path) -> Path:
     return decoded_dir.parent / "character_request.json"
 
@@ -82,7 +141,7 @@ def remove_chroma_background(image: Image.Image, chroma_key: tuple[int, int, int
             red, green, blue, alpha = pixels[x, y]
             if color_distance(red, green, blue, chroma_key) <= threshold:
                 pixels[x, y] = (red, green, blue, 0)
-    return rgba
+    return scrub_hidden_rgb(rgba)
 
 
 def fit_to_cell(image: Image.Image, cell_width: int, cell_height: int) -> Image.Image:
@@ -95,11 +154,13 @@ def fit_to_cell(image: Image.Image, cell_width: int, cell_height: int) -> Image.
     max_height = cell_height - max(2, min(10, cell_height // 16))
     scale = min(max_width / sprite.width, max_height / sprite.height, 1.0)
     if scale != 1.0:
-        sprite = sprite.resize((max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))), Image.Resampling.LANCZOS)
+        sprite = resize_rgba_alpha_safe(sprite, (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))))
+    else:
+        sprite = scrub_hidden_rgb(sprite)
     left = (cell_width - sprite.width) // 2
     top = (cell_height - sprite.height) // 2
     target.alpha_composite(sprite, (left, top))
-    return target
+    return scrub_hidden_rgb(target)
 
 
 def connected_components(image: Image.Image) -> list[dict[str, Any]]:
@@ -228,6 +289,7 @@ def extract_state(strip_path: Path, spec: dict[str, Any], output_root: Path, chr
     outputs = []
     for index, frame in enumerate(frames):
         out = state_dir / f"{index:02d}.png"
+        frame = scrub_chroma_key_leaks(frame, chroma_key, max(threshold, 32.0))
         frame.save(out)
         outputs.append(str(out))
     return {"state": state, "row": int(spec["row"]), "frames": frame_count, "method": used_method, "strip": str(strip_path), "outputs": outputs}

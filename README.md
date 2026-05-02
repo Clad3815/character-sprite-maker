@@ -23,8 +23,15 @@ python "$SKILL_DIR/scripts/character_job_status.py" --run-dir ./output/milo
 Generate each ready job with `$imagegen`, then record selected images:
 
 ```bash
-python "$SKILL_DIR/scripts/record_imagegen_result.py" --run-dir ./output/milo --job-id base --source /path/to/ig_base.png
-python "$SKILL_DIR/scripts/record_imagegen_result.py" --run-dir ./output/milo --job-id idle --source /path/to/ig_idle.png
+python "$SKILL_DIR/scripts/record_imagegen_result.py" --run-dir ./output/milo --job-id base --source /path/to/ig_base.png --strict-chroma-background
+python "$SKILL_DIR/scripts/record_imagegen_result.py" --run-dir ./output/milo --job-id idle --source /path/to/ig_idle.png --strict-chroma-background
+```
+
+If a selected image has a visually clean chroma background but strict recording fails because imagegen drifted the RGB value, normalize it to alpha and record that normalized source:
+
+```bash
+python "$SKILL_DIR/scripts/normalize_chroma_source.py" --run-dir ./output/milo --source /path/to/ig_idle.png --out ./output/milo/normalized/idle.png --auto-key border --force
+python "$SKILL_DIR/scripts/record_imagegen_result.py" --run-dir ./output/milo --job-id idle --source ./output/milo/normalized/idle.png --strict-chroma-background --allow-run-source --force
 ```
 
 Finalize:

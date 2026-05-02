@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,49 @@ from PIL import Image
 def alpha_nonzero_count(image: Image.Image) -> int:
     alpha = image.getchannel("A")
     return sum(alpha.histogram()[1:])
+
+
+def parse_hex_color(value: str) -> tuple[int, int, int]:
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+        raise SystemExit(f"invalid chroma key color: {value}; expected #RRGGBB")
+    return tuple(int(value[index:index + 2], 16) for index in (1, 3, 5))
+
+
+def color_distance(red: int, green: int, blue: int, key: tuple[int, int, int]) -> float:
+    return math.sqrt((red - key[0]) ** 2 + (green - key[1]) ** 2 + (blue - key[2]) ** 2)
+
+
+def iter_rgba_pixels(image: Image.Image):
+    data = image.convert("RGBA").tobytes()
+    for index in range(0, len(data), 4):
+        yield data[index], data[index + 1], data[index + 2], data[index + 3]
+
+
+def load_chroma_key(request: dict[str, Any]) -> tuple[int, int, int] | None:
+    chroma_key = request.get("chroma_key")
+    if not isinstance(chroma_key, dict):
+        return None
+    rgb = chroma_key.get("rgb")
+    if isinstance(rgb, list) and len(rgb) == 3 and all(isinstance(value, int) for value in rgb):
+        return (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+    raw_hex = chroma_key.get("hex")
+    if isinstance(raw_hex, str):
+        return parse_hex_color(raw_hex)
+    return None
+
+
+def visible_chroma_key_leaks(image: Image.Image, chroma_key: tuple[int, int, int], threshold: float, alpha_threshold: int = 16) -> dict[str, int]:
+    exact = 0
+    near = 0
+    for red, green, blue, alpha in iter_rgba_pixels(image):
+        if alpha <= alpha_threshold:
+            continue
+        distance = color_distance(red, green, blue, chroma_key)
+        if distance <= 1:
+            exact += 1
+        if distance <= threshold:
+            near += 1
+    return {"exact": exact, "near": near}
 
 
 def load_request(path: Path) -> dict[str, Any]:
@@ -51,6 +96,8 @@ def main() -> None:
     parser.add_argument("--near-opaque-threshold", type=float, default=0.95)
     parser.add_argument("--allow-opaque", action="store_true")
     parser.add_argument("--allow-near-opaque-used-cells", action="store_true")
+    parser.add_argument("--chroma-leak-threshold", type=float, default=32.0)
+    parser.add_argument("--allow-chroma-key-leak", action="store_true")
     args = parser.parse_args()
 
     request = load_request(Path(args.request).expanduser().resolve())
@@ -77,6 +124,21 @@ def main() -> None:
         errors.append(f"expected PNG or WebP, got {source_format}")
     if "A" not in source_mode and not args.allow_opaque:
         errors.append("atlas does not have an alpha channel")
+
+    chroma_key = load_chroma_key(request)
+    chroma_leaks = {"exact": 0, "near": 0}
+    if chroma_key is not None:
+        chroma_leaks = visible_chroma_key_leaks(image, chroma_key, args.chroma_leak_threshold)
+        if chroma_leaks["near"]:
+            message = (
+                f"atlas has {chroma_leaks['near']} visible pixels within "
+                f"{args.chroma_leak_threshold:g}px of the chroma key "
+                f"({chroma_leaks['exact']} exact-key pixels)"
+            )
+            if args.allow_chroma_key_leak:
+                warnings.append(message)
+            else:
+                errors.append(message)
 
     cell_width = atlas_spec["cell_width"]
     cell_height = atlas_spec["cell_height"]
@@ -113,7 +175,18 @@ def main() -> None:
         else:
             errors.append(message)
 
-    result = {"ok": not errors, "file": str(atlas_path), "format": source_format, "mode": source_mode, "width": image.width, "height": image.height, "errors": errors, "warnings": warnings, "cells": cells}
+    result = {
+        "ok": not errors,
+        "file": str(atlas_path),
+        "format": source_format,
+        "mode": source_mode,
+        "width": image.width,
+        "height": image.height,
+        "errors": errors,
+        "warnings": warnings,
+        "chroma_key_leaks": chroma_leaks,
+        "cells": cells,
+    }
     if args.json_out:
         Path(args.json_out).expanduser().resolve().write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "cells"}, indent=2))
