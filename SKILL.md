@@ -187,6 +187,19 @@ Run job status again. For each ready animation job:
 - reject outputs whose background is not one exact flat chroma key color across the full canvas;
 - record the selected `$imagegen` output with `record_imagegen_result.py`.
 
+Parallelize animation generation with subagents (preferred):
+
+Once the `base` is generated, validated, and recorded as `decoded/base.png` / `references/canonical-base.png`, prefer dispatching the remaining animation-strip jobs to subagents in parallel when a subagent / Task delegation mechanism is available in the host environment. Animation strips are independent (they all ground on the same canonical base plus their own layout guide), so generating them concurrently dramatically reduces wall-clock time.
+
+Guidelines when delegating to subagents:
+
+- Only parallelize after the `base` job is fully validated and recorded. Never parallelize the base itself.
+- Launch one subagent per ready animation job (or small batches), all in a single dispatch where the host supports concurrent subagent calls.
+- Give each subagent a self-contained brief: the run directory, the exact `job-id`, the prompt file path, the full list of input images (with role labels, including the canonical base and the matching layout guide), the chroma-key requirements, and the instruction to call `$imagegen` and then `record_imagegen_result.py --strict-chroma-background` for that single job.
+- Each subagent must record its result independently via `record_imagegen_result.py`; do not let subagents edit `imagegen-jobs.json` directly or touch jobs other than their own.
+- Mirror-derived rows (e.g. `walk-left` from `walk-right`) must wait for their source row to be recorded; either keep them in the main agent or schedule them in a second wave after the source completes.
+- If the host environment does not expose subagents, or the user declines parallel delegation, fall back to sequential generation in the main agent using the same per-job rules.
+
 For left/right pairs, the prepare script may create a mirror policy, e.g. `walk-left` may derive from `walk-right`. Only mirror after visual inspection confirms it preserves identity, side-specific costume details, props, readable text, logos, lighting, and direction semantics:
 
 ```bash
