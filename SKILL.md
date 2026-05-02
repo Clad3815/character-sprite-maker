@@ -193,7 +193,18 @@ python "$SKILL_DIR/scripts/record_imagegen_result.py" \
   --allow-run-source
 ```
 
-This writes `decoded/base.png` and `references/canonical-base.png`. Every animation strip must use the canonical base as a grounding image.
+This writes `decoded/base.png` and `references/canonical-base.png`.
+
+Before continuing, visually inspect the decoded base image, not only the raw `$imagegen` output:
+
+- Open `decoded/base.png` or `references/canonical-base.png` after recording/normalization.
+- Confirm the character is clean, fully visible, animation-ready, and faithful to the request.
+- Confirm costume colors, outlines, face, body proportions, silhouette, and palette are correct.
+- Confirm any dark/black areas are intentional line art or requested costume details, not accidental filled clothing, muddy extraction, shadows, or generated artifacts.
+- Confirm there are no visible chroma-key pixels, background remnants, shadows, glows, labels, watermarks, frame guides, or unrelated marks.
+- If the decoded base is not clean, do not generate animation strips. Regenerate or repair the base, record it again, and repeat this visual inspection.
+
+Every animation strip must use the approved canonical base as a grounding image.
 
 4. Generate animation strips.
 
