@@ -1,0 +1,4 @@
+interface:
+  display_name: "Character Sprite Maker"
+  short_description: "Generate configurable 2D game character spritesheets"
+  default_prompt: "Create a configurable 2D character spritesheet from a concept, references, style preset, and animation list. Use $imagegen for base art and grounded animation strips, use layout guides for frame counts, optionally mirror safe left/right pairs after visual review, then deterministically extract frames, validate, compose the atlas, create contact sheets/GIFs, and package character.json plus spritesheet."

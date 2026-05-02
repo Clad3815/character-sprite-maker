@@ -1,0 +1,27 @@
+{
+  "character_name": "Milo",
+  "description": "An original family-friendly 2D platformer hero sprite.",
+  "character_notes": "An original cheerful plumber-like platformer hero with a round cap, work overalls, white gloves, expressive face, and compact mascot proportions; not a copyrighted character.",
+  "style_preset": "mario-like",
+  "style_notes": "Bright colors, rounded readable shapes, simple face, clean outline, animation-ready silhouette.",
+  "view": "side-view",
+  "cell_width": 128,
+  "cell_height": 128,
+  "fps": 12,
+  "chroma_key": "auto",
+  "animations": [
+    {"name": "idle", "frames": 6, "action": "friendly idle breathing and blink loop"},
+    {"name": "walk-right", "frames": 8, "action": "rightward platformer walk cycle"},
+    {"name": "walk-left", "frames": 8, "action": "leftward platformer walk cycle"},
+    {"name": "run-right", "frames": 8, "action": "rightward fast run cycle"},
+    {"name": "run-left", "frames": 8, "action": "leftward fast run cycle"},
+    {"name": "jump", "frames": 6, "action": "squash anticipation, airborne jump, landing settle"},
+    {"name": "crouch", "frames": 4, "action": "small crouch and hold"},
+    {"name": "attack", "frames": 6, "action": "simple action gesture without a weapon"},
+    {"name": "hurt", "frames": 4, "action": "brief bonk or damage reaction"}
+  ],
+  "mirror_pairs": {
+    "walk-left": "walk-right",
+    "run-left": "run-right"
+  }
+}
